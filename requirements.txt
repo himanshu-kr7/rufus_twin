@@ -7,3 +7,4 @@ sentence-transformers==2.7.0
 python-dotenv==1.0.1
 requests==2.31.0
 apify-client==1.6.1
+rank_bm25

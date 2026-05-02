@@ -1,27 +1,59 @@
 import os
+import pickle
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
+from langchain.retrievers import EnsembleRetriever
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
 
-def get_rufus_response(user_query):
-    """Retrieves relevant context from FAISS and generates an LLM response with verifiable citations."""
+def load_hybrid_retriever():
+    """
+    Loads and merges the local FAISS and BM25 stores into an EnsembleRetriever.
+    Returns None if the indices are missing.
+    """
     embeddings = OpenAIEmbeddings()
+    
     try:
+        # allow_dangerous_deserialization is required for local FAISS loading in LangChain >= 0.1.0
         vectorstore = FAISS.load_local(
             "vector_store", 
             embeddings, 
             allow_dangerous_deserialization=True
         )
+        faiss_retriever = vectorstore.as_retriever(search_kwargs={"k": 3}) 
     except Exception as e:
-        return "Error: Vector store not found. Please run data_ingestion.py first.", []
+        print(f"[ERROR] FAISS index initialization failed: {e}")
+        return None
 
-    retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
-    llm = ChatOpenAI(temperature=0.2, model="gpt-3.5-turbo")
+    try:
+        with open("retriever_store/bm25_retriever.pkl", "rb") as f:
+            bm25_retriever = pickle.load(f)
+        bm25_retriever.k = 3 
+    except Exception as e:
+        print(f"[ERROR] BM25 index initialization failed: {e}")
+        return None
+
+    # Merge retrievers: 50% semantic meaning, 50% exact keyword matching
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[faiss_retriever, bm25_retriever],
+        weights=[0.5, 0.5]
+    )
+    return ensemble_retriever
+
+def get_rufus_chain():
+    """
+    Constructs the core RAG chain, binding the hybrid retriever to the LLM.
+    Configured for token streaming to reduce perceived latency in the UI.
+    """
+    retriever = load_hybrid_retriever()
+    if not retriever:
+        return None
+
+    llm = ChatOpenAI(temperature=0.2, model="gpt-3.5-turbo", streaming=True)
 
     system_prompt = (
         "You are Rufus, Amazon's elite AI shopping assistant. "
@@ -41,18 +73,20 @@ def get_rufus_response(user_query):
 
     question_answer_chain = create_stuff_documents_chain(llm, prompt)
     rag_chain = create_retrieval_chain(retriever, question_answer_chain)
-
-    response = rag_chain.invoke({"input": user_query})
     
-    return response["answer"], response["context"]
+    return rag_chain
 
 if __name__ == "__main__":
-    print("\n[INFO] 🤖 Rufus Brain Initialized. Type 'exit' to quit.")
-    while True:
-        query = input("\nYou: ")
-        if query.lower() == 'exit':
-            break
-        print("[INFO] Rufus is thinking...")
-        answer, sources = get_rufus_response(query)
-        print(f"\nRufus: {answer}")
-        print(f"\n[SUCCESS] Sources Cited: {len(sources)} documents")
+    # Diagnostic Health Check for local testing
+    print("\n[INFO] Running Rufus Brain Diagnostic Check...")
+    
+    test_chain = get_rufus_chain()
+    
+    if test_chain:
+        print("[SUCCESS] Rufus Brain backend initialized perfectly.")
+        print("[INFO] Hybrid Retrievers (FAISS + BM25) loaded successfully.")
+        print("[INFO] LLM Chain and system prompts are configured.")
+        print("\n▶ To interact with Rufus, run the UI with: `streamlit run app.py`\n")
+    else:
+        print("\n[FAILED] Rufus Brain initialization failed.")
+        print("[ACTION] Please ensure you have run `python data_ingestion.py` first to generate the local vector stores.\n")
