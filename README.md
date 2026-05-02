@@ -24,7 +24,7 @@ This application scrapes live Amazon product data and uses a sophisticated Retri
 * **Data Ingestion:** Apify (Amazon Crawler)
 
 ## 💻 Local Setup
-1. Clone the repository: `git clone [https://github.com/your-username/rufus_twin.git](https://github.com/your-username/rufus_twin.git)`
+1. Clone the repository: `git clone [https://github.com/himanshu-kr7/rufus_twin.git](https://github.com/himanshu-kr7/rufus_twin.git)`
 2. Install dependencies: `pip install -r requirements.txt`
 3. Create a `.env` file and add your API keys:
    `OPENAI_API_KEY=your_openai_key`
